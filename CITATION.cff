@@ -1,0 +1,13 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite the associated manuscript and this repository release."
+title: "Synthetic Replacement Experiments"
+version: 1.3.0
+date-released: 2026-09-14
+authors:
+  - family-names: Ritter
+    given-names: Debra
+  - family-names: Kubek
+    given-names: Mario
+  - family-names: Kuzmin
+    given-names: Kiril
+repository-code: "https://github.com/DebraBeat/Synthetic-Data-Analysis"

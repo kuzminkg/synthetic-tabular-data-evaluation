@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Environments and editors
+.venv/
+venv/
+.env
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Raw datasets are not redistributed by this repository
+data/*.csv
+data/*.arff
+data/*.zip
+!data/README.md
+
+# Generated experiment outputs
+results/**
+!results/.gitkeep
+!results/README.md
+
+# Generated figures and tables
+figures/
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+
+# Temporary VS Code files
+tempCodeRunnerFile.py
