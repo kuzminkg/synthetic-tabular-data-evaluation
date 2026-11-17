@@ -79,6 +79,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Stratified row limit for debugging only.",
     )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Reuse matching completed checkpoints in --out-dir after interruption.",
+    )
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument(
         "--quick",
@@ -131,6 +136,7 @@ def main(argv: list[str] | None = None) -> None:
         config=config,
         max_rows_per_dataset=max_rows,
         progress=not args.quiet,
+        resume=args.resume,
     )
     print(f"Wrote fold scores: {args.out_dir / 'fold_scores.csv'}")
     print(f"Wrote summary: {args.out_dir / 'summary_scores.csv'}")

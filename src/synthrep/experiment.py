@@ -378,6 +378,81 @@ def _installed_versions() -> dict[str, str]:
     return versions
 
 
+def _source_fingerprint() -> str:
+    """Fingerprint experiment package source to prevent mixing code revisions."""
+
+    digest = hashlib.sha256()
+    for path in sorted(Path(__file__).parent.glob("*.py")):
+        digest.update(path.name.encode("utf-8"))
+        digest.update(path.read_bytes())
+    return digest.hexdigest()
+
+
+def _write_json_atomic(path: Path, data: dict[str, object]) -> None:
+    temporary = path.with_name(path.name + ".tmp")
+    temporary.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    temporary.replace(path)
+
+
+def _load_completed_checkpoint(
+    path: Path,
+    *,
+    dataset: str,
+    model: str,
+    generator_name: str,
+    fraction: float,
+    config: ExperimentConfig,
+) -> pd.DataFrame:
+    """Refuse to reuse an incomplete or mismatched checkpoint."""
+
+    try:
+        scores = pd.read_csv(path)
+    except Exception as exc:
+        raise ValueError(f"Cannot read checkpoint {path}: {exc}") from exc
+
+    required = {
+        "dataset", "model", "training_fraction", "split_id", "regime",
+        "metric", "score", "status", "regularization_policy",
+        "n_train_real", "n_train_regime", "logreg_c",
+    }
+    missing = required.difference(scores.columns)
+    if missing:
+        raise ValueError(f"Checkpoint {path} is missing columns: {sorted(missing)}")
+
+    if config.synthetic_mode == "class_conditional":
+        expected_regimes = {"Real-only", "Synthetic-only"}
+        expected_regimes.update(f"Mixed +{float(x):g}x" for x in config.mix_amounts)
+    else:
+        expected_regimes = {"Real-only", "Minority-replaced"}
+        expected_regimes.update(f"Minority +{float(x):g}x" for x in config.mix_amounts)
+
+    _, canonical_generator = make_generator(generator_name, random_state=config.random_state)
+    n_splits = config.n_splits * config.n_repeats
+    expected_rows = n_splits * len(expected_regimes) * 2
+    if (
+        len(scores) != expected_rows
+        or set(scores["dataset"]) != {dataset}
+        or set(scores["model"]) != {model}
+        or set(scores["generator"]) != {canonical_generator}
+        or not np.allclose(scores["training_fraction"], fraction)
+        or set(scores["split_id"]) != set(range(n_splits))
+        or set(scores["regime"]) != expected_regimes
+        or set(scores["metric"]) != {"AUROC", "AUPRC"}
+        or set(scores["regularization_policy"]) != {config.regularization_policy}
+        or scores.duplicated(["split_id", "regime", "metric"]).any()
+    ):
+        raise ValueError(f"Checkpoint {path} does not match the requested experiment grid")
+
+    if model == "logreg":
+        expected_c = [
+            _logreg_c_for_regime(config.regularization_policy, int(n_real), int(n_regime))
+            for n_real, n_regime in zip(scores["n_train_real"], scores["n_train_regime"])
+        ]
+        if not np.allclose(scores["logreg_c"], expected_c, rtol=1e-10, atol=1e-12):
+            raise ValueError(f"Checkpoint {path} contains mismatched logistic C values")
+    return scores
+
+
 def run_experiment_grid(
     *,
     data_dir: str | Path,
@@ -388,18 +463,32 @@ def run_experiment_grid(
     config: ExperimentConfig,
     max_rows_per_dataset: int | None = None,
     progress: bool = True,
+    resume: bool = False,
 ) -> dict[str, pd.DataFrame]:
-    """Run the requested grid and write fold, summary, statistical, and manifest files."""
+    """Run the grid; optionally resume matching per-configuration checkpoints."""
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    checkpoint_dir = output_dir / "checkpoints"
+    checkpoint_manifest_path = checkpoint_dir / "run_manifest.json"
+    if checkpoint_dir.exists() and any(checkpoint_dir.iterdir()) and not resume:
+        raise FileExistsError(
+            f"Checkpoints already exist in {checkpoint_dir}. "
+            "Use --resume to reuse compatible checkpoints, or choose a new --out-dir."
+        )
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
     dataset_names = list(datasets)
     model_names = list(models)
     generator_names = list(generators)
+    existing_checkpoint_names = {p.name for p in checkpoint_dir.glob("*.csv")}
 
     manifest: dict[str, object] = {
         "created_utc": datetime.now(timezone.utc).isoformat(),
-        "config": asdict(config),
+        "requested_datasets": dataset_names,
+        "source_fingerprint": _source_fingerprint(),
+        "config": json.loads(json.dumps(asdict(config))),
         "data_dir": str(data_dir),
         "datasets": {},
         "models": model_names,
@@ -411,6 +500,33 @@ def run_experiment_grid(
             "packages": _installed_versions(),
         },
     }
+
+    previous_manifest = None
+    if resume and checkpoint_manifest_path.exists():
+        try:
+            previous_manifest = json.loads(checkpoint_manifest_path.read_text(encoding="utf-8"))
+        except (ValueError, OSError) as exc:
+            raise ValueError("Cannot read the saved checkpoint manifest") from exc
+        fields = (
+            "requested_datasets", "source_fingerprint", "config", "data_dir",
+            "models", "generators", "max_rows_per_dataset", "environment",
+        )
+        different = [key for key in fields if previous_manifest.get(key) != manifest[key]]
+        if different:
+            raise ValueError(
+                "Cannot resume: checkpoint manifest differs in " + ", ".join(different) +
+                ". Use a new --out-dir for changed code or settings."
+            )
+        manifest["created_utc"] = previous_manifest["created_utc"]
+        # Retain metadata for datasets completed before the interrupted run.
+        manifest["datasets"] = dict(previous_manifest.get("datasets", {}))
+    elif existing_checkpoint_names:
+        raise ValueError(
+            "Cannot resume: CSV checkpoints exist but their run manifest is missing. "
+            "Keep the files for recovery and use a new --out-dir."
+        )
+
+    encountered_checkpoint_names: set[str] = set()
 
     all_results: list[pd.DataFrame] = []
     for dataset_name in dataset_names:
@@ -425,7 +541,7 @@ def run_experiment_grid(
             holdout_size=config.holdout_size,
             random_state=config.random_state,
         )
-        manifest["datasets"][bundle.name] = {
+        dataset_metadata = {
             "source_filename": bundle.source_path.name,
             "source_sha256": file_sha256(bundle.source_path),
             "n_rows_used": bundle.n_rows,
@@ -437,12 +553,46 @@ def run_experiment_grid(
             "categorical_columns": list(bundle.categorical_columns),
             "numeric_columns": list(bundle.numeric_columns),
         }
+        if previous_manifest is not None:
+            prior_metadata = previous_manifest.get("datasets", {}).get(bundle.name)
+            if prior_metadata is not None and prior_metadata != dataset_metadata:
+                raise ValueError(
+                    f"Cannot resume: dataset {bundle.name} changed (file hash, schema, or split). "
+                    "Use a new --out-dir."
+                )
+        manifest["datasets"][bundle.name] = dataset_metadata
+        # Record the dataset checksum before any of its checkpoints are saved.
+        _write_json_atomic(checkpoint_manifest_path, manifest)
 
         for model_name in model_names:
             for generator_name in generator_names:
                 for fraction in config.training_fractions:
-                    all_results.append(
-                        run_one_experiment(
+                    # Index and filename must be stable across interrupted reruns.
+                    checkpoint_name = (
+                        f"{len(all_results):04d}_{bundle.name}_{model_name}_"
+                        f"{generator_name}_{float(fraction):g}.csv"
+                    )
+                    checkpoint_path = checkpoint_dir / checkpoint_name
+                    encountered_checkpoint_names.add(checkpoint_name)
+                    if checkpoint_path.exists():
+                        if not resume:
+                            raise FileExistsError(f"Checkpoint already exists: {checkpoint_path}")
+                        if previous_manifest is None:
+                            raise ValueError("Checkpoint exists but no matching run manifest was loaded")
+                        if bundle.name not in previous_manifest.get("datasets", {}):
+                            raise ValueError(f"Missing dataset metadata for {checkpoint_path}")
+                        result = _load_completed_checkpoint(
+                            checkpoint_path,
+                            dataset=bundle.name,
+                            model=model_name,
+                            generator_name=generator_name,
+                            fraction=float(fraction),
+                            config=config,
+                        )
+                        if progress:
+                            print(f"Checkpoint reused: {checkpoint_path}", flush=True)
+                    else:
+                        result = run_one_experiment(
                             bundle,
                             X_development,
                             y_development,
@@ -452,11 +602,20 @@ def run_experiment_grid(
                             config=config,
                             progress=progress,
                         )
-                    )
+                        temporary_path = checkpoint_dir / f"{checkpoint_name}.tmp"
+                        result.to_csv(temporary_path, index=False)
+                        temporary_path.replace(checkpoint_path)
+                        if progress:
+                            print(f"Checkpoint saved: {checkpoint_path}", flush=True)
+                    all_results.append(result)
 
-    fold_scores = (
-        pd.concat(all_results, ignore_index=True) if all_results else pd.DataFrame()
-    )
+    unexpected = existing_checkpoint_names - encountered_checkpoint_names
+    if unexpected:
+        raise ValueError(
+            "Cannot resume: unrelated checkpoint files present: " + ", ".join(sorted(unexpected))
+        )
+
+    fold_scores = pd.concat(all_results, ignore_index=True) if all_results else pd.DataFrame()
     if not fold_scores.empty:
         _assert_real_only_invariant(fold_scores)
     summary = summarize_scores(fold_scores)
