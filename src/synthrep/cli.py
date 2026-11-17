@@ -54,6 +54,16 @@ def build_parser() -> argparse.ArgumentParser:
         default="class_conditional",
     )
     parser.add_argument(
+        "--regularization-policy",
+        choices=["fixed", "adjusted"],
+        default="fixed",
+        help=(
+            "Logistic regression regularization policy: "
+            "'fixed' uses C=1 for all regimes; "
+            "'adjusted' scales C by n_real / n_regime."
+        ),
+    )
+    parser.add_argument(
         "--categorical-encoding",
         choices=["target_order", "ordinal", "none"],
         default="target_order",
@@ -107,6 +117,7 @@ def main(argv: list[str] | None = None) -> None:
         training_fractions=training_fractions,
         mix_amounts=mix_amounts,
         synthetic_mode=args.synthetic_mode,
+        regularization_policy=args.regularization_policy,
         positive_label=1,
         preprocessor=preprocess_config,
     )
@@ -124,7 +135,9 @@ def main(argv: list[str] | None = None) -> None:
     print(f"Wrote fold scores: {args.out_dir / 'fold_scores.csv'}")
     print(f"Wrote summary: {args.out_dir / 'summary_scores.csv'}")
     print(f"Wrote corrected paired tests: {args.out_dir / 'paired_tests_vs_real.csv'}")
-    print(f"Rows: fold={len(outputs['fold_scores'])}, summary={len(outputs['summary'])}")
+    print(
+        f"Rows: fold={len(outputs['fold_scores'])}, summary={len(outputs['summary'])}"
+    )
 
 
 if __name__ == "__main__":

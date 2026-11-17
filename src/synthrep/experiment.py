@@ -14,7 +14,6 @@ from typing import Iterable
 
 import numpy as np
 import pandas as pd
-from sklearn.base import clone
 from sklearn.metrics import average_precision_score, roc_auc_score
 from sklearn.model_selection import RepeatedStratifiedKFold, train_test_split
 
@@ -76,7 +75,9 @@ def stratified_fraction_subset(
     for class_label in sorted(y.unique(), key=str):
         class_indices = np.flatnonzero(y.to_numpy() == class_label)
         permutation = rng.permutation(class_indices)
-        n_select = min(len(class_indices), max(1, int(round(fraction * len(class_indices)))))
+        n_select = min(
+            len(class_indices), max(1, int(round(fraction * len(class_indices))))
+        )
         selected.extend(permutation[:n_select].tolist())
     selected_array = np.array(sorted(selected), dtype=int)
     return (
@@ -85,13 +86,17 @@ def stratified_fraction_subset(
     )
 
 
-def _positive_probabilities(estimator, X: pd.DataFrame, positive_label: int | str) -> np.ndarray:
+def _positive_probabilities(
+    estimator, X: pd.DataFrame, positive_label: int | str
+) -> np.ndarray:
     if not hasattr(estimator, "predict_proba"):
         raise TypeError("Estimator must implement predict_proba for AUROC/AUPRC")
     probabilities = estimator.predict_proba(X)
     classes = list(estimator.classes_)
     if positive_label not in classes:
-        raise ValueError(f"positive_label={positive_label!r} not found in fitted classes {classes!r}")
+        raise ValueError(
+            f"positive_label={positive_label!r} not found in fitted classes {classes!r}"
+        )
     return probabilities[:, classes.index(positive_label)]
 
 
@@ -100,6 +105,25 @@ def _score_metrics(y_true: pd.Series, probabilities: np.ndarray) -> dict[str, fl
         "AUROC": float(roc_auc_score(y_true, probabilities)),
         "AUPRC": float(average_precision_score(y_true, probabilities)),
     }
+
+
+def _logreg_c_for_regime(
+    policy: str,
+    n_real: int,
+    n_regime: int,
+) -> float:
+    """Calculate logistic-regression C based on training size."""
+
+    if n_real <= 0 or n_regime <= 0:
+        raise ValueError("Training row counts must be positive")
+
+    if policy == "fixed":
+        return 1.0
+
+    if policy == "adjusted":
+        return n_real / n_regime
+
+    raise ValueError(f"Unknown regularization policy: {policy!r}")
 
 
 def _make_regimes(
@@ -151,9 +175,13 @@ def _make_regimes(
             )
 
         if minority_class == majority_class:
-            raise RuntimeError("Minority-only mode requires two classes with different counts")
+            raise RuntimeError(
+                "Minority-only mode requires two classes with different counts"
+            )
     else:
-        raise ValueError("synthetic_mode must be 'class_conditional' or 'minority_only'")
+        raise ValueError(
+            "synthetic_mode must be 'class_conditional' or 'minority_only'"
+        )
 
     return regimes
 
@@ -190,8 +218,12 @@ def run_one_experiment(
     ):
         repeat_id = split_id // config.n_splits
         fold_id = split_id % config.n_splits
-        X_train_available = X_development.iloc[available_train_idx].reset_index(drop=True)
-        y_train_available = y_development.iloc[available_train_idx].reset_index(drop=True)
+        X_train_available = X_development.iloc[available_train_idx].reset_index(
+            drop=True
+        )
+        y_train_available = y_development.iloc[available_train_idx].reset_index(
+            drop=True
+        )
         X_validation_raw = X_development.iloc[validation_idx].reset_index(drop=True)
         y_validation = y_development.iloc[validation_idx].reset_index(drop=True)
 
@@ -204,8 +236,12 @@ def run_one_experiment(
         )
         y_train = y_train.rename("target")
 
-        preprocessing_seed = derive_seed(config.random_state, bundle.name, "preprocess", split_id)
-        preprocessor_config = replace(config.preprocessor, random_state=preprocessing_seed)
+        preprocessing_seed = derive_seed(
+            config.random_state, bundle.name, "preprocess", split_id
+        )
+        preprocessor_config = replace(
+            config.preprocessor, random_state=preprocessing_seed
+        )
         preprocessor = FoldPreprocessor(
             categorical_columns=bundle.categorical_columns,
             numeric_columns=bundle.numeric_columns,
@@ -240,9 +276,16 @@ def run_one_experiment(
                 f"fraction={training_fraction:g} repeat={repeat_id}"
             )
 
-        model_seed = derive_seed(config.random_state, bundle.name, model_name, "model", split_id)
-        base_estimator = make_model(model_name, random_state=model_seed)
+        model_seed = derive_seed(
+            config.random_state, bundle.name, model_name, "model", split_id
+        )
+
         for regime_name, (X_regime, y_regime) in regimes.items():
+            logreg_c = _logreg_c_for_regime(
+                config.regularization_policy,
+                n_real=len(X_train),
+                n_regime=len(X_regime),
+            )
             base_row = {
                 "dataset": bundle.name,
                 "model": model_name,
@@ -261,6 +304,8 @@ def run_one_experiment(
                 "positive_rate_train_real": float(y_train.mean()),
                 "positive_rate_train_regime": float(y_regime.mean()),
                 "positive_rate_validation": float(y_validation.mean()),
+                "regularization_policy": config.regularization_policy,
+                "logreg_c": logreg_c if model_name == "logreg" else np.nan,
             }
             if y_regime.nunique() < 2:
                 for metric in ("AUROC", "AUPRC"):
@@ -274,10 +319,16 @@ def run_one_experiment(
                     )
                 continue
 
-            estimator = clone(base_estimator)
+            estimator = make_model(
+                model_name, random_state=model_seed, logreg_c=logreg_c
+            )
             estimator.fit(X_regime, y_regime)
-            probabilities = _positive_probabilities(estimator, X_validation, config.positive_label)
-            for metric_name, score in _score_metrics(y_validation, probabilities).items():
+            probabilities = _positive_probabilities(
+                estimator, X_validation, config.positive_label
+            )
+            for metric_name, score in _score_metrics(
+                y_validation, probabilities
+            ).items():
                 rows.append(
                     {
                         **base_row,
@@ -290,8 +341,9 @@ def run_one_experiment(
     return pd.DataFrame(rows)
 
 
-
-def _assert_real_only_invariant(fold_scores: pd.DataFrame, *, tolerance: float = 1e-12) -> None:
+def _assert_real_only_invariant(
+    fold_scores: pd.DataFrame, *, tolerance: float = 1e-12
+) -> None:
     """Verify that duplicated Real-only baselines agree across generator loops."""
 
     baseline = fold_scores[fold_scores["regime"] == "Real-only"].copy()
@@ -313,6 +365,7 @@ def _assert_real_only_invariant(fold_scores: pd.DataFrame, *, tolerance: float =
             "Real-only scores differ across generator loops. The paired baseline is not invariant. "
             f"First disagreements:\n{disagreements.head().to_string()}"
         )
+
 
 def _installed_versions() -> dict[str, str]:
     packages = ["numpy", "pandas", "scikit-learn", "scipy", "matplotlib"]
@@ -401,7 +454,9 @@ def run_experiment_grid(
                         )
                     )
 
-    fold_scores = pd.concat(all_results, ignore_index=True) if all_results else pd.DataFrame()
+    fold_scores = (
+        pd.concat(all_results, ignore_index=True) if all_results else pd.DataFrame()
+    )
     if not fold_scores.empty:
         _assert_real_only_invariant(fold_scores)
     summary = summarize_scores(fold_scores)

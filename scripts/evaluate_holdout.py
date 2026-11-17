@@ -17,22 +17,38 @@ def _config_from_manifest(path: Path) -> tuple[ExperimentConfig, int | None]:
     raw = manifest.get("config", {})
     raw_preprocessing = raw.get("preprocessor", {})
     preprocessing = PreprocessConfig(
-        categorical_encoding=raw_preprocessing.get("categorical_encoding", "target_order"),
-        numeric_impute_strategy=raw_preprocessing.get("numeric_impute_strategy", "median"),
-        unknown_category_value=float(raw_preprocessing.get("unknown_category_value", 0.5)),
-        target_order_smoothing=float(raw_preprocessing.get("target_order_smoothing", 10.0)),
-        target_order_inner_folds=int(raw_preprocessing.get("target_order_inner_folds", 5)),
+        categorical_encoding=raw_preprocessing.get(
+            "categorical_encoding", "target_order"
+        ),
+        numeric_impute_strategy=raw_preprocessing.get(
+            "numeric_impute_strategy", "median"
+        ),
+        unknown_category_value=float(
+            raw_preprocessing.get("unknown_category_value", 0.5)
+        ),
+        target_order_smoothing=float(
+            raw_preprocessing.get("target_order_smoothing", 10.0)
+        ),
+        target_order_inner_folds=int(
+            raw_preprocessing.get("target_order_inner_folds", 5)
+        ),
         standardize=bool(raw_preprocessing.get("standardize", True)),
-        random_state=int(raw_preprocessing.get("random_state", raw.get("random_state", 42))),
+        random_state=int(
+            raw_preprocessing.get("random_state", raw.get("random_state", 42))
+        ),
     )
     config = ExperimentConfig(
         random_state=int(raw.get("random_state", 42)),
         holdout_size=float(raw.get("holdout_size", 0.20)),
         n_splits=int(raw.get("n_splits", 5)),
         n_repeats=int(raw.get("n_repeats", 10)),
-        training_fractions=tuple(float(value) for value in raw.get("training_fractions", [0.1, 0.25, 0.5, 1.0])),
+        training_fractions=tuple(
+            float(value)
+            for value in raw.get("training_fractions", [0.1, 0.25, 0.5, 1.0])
+        ),
         mix_amounts=tuple(float(value) for value in raw.get("mix_amounts", [1.0, 3.0])),
         synthetic_mode=raw.get("synthetic_mode", "class_conditional"),
+        regularization_policy=raw.get("regularization_policy", "fixed"),
         positive_label=int(raw.get("positive_label", 1)),
         preprocessor=preprocessing,
     )

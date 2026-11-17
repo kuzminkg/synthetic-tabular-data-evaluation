@@ -10,7 +10,7 @@ from sklearn.linear_model import LogisticRegression
 ModelName = Literal["logreg", "random_forest"]
 
 
-def make_estimator(name: str, *, random_state: int = 42):
+def make_estimator(name: str, *, random_state: int = 42, logreg_c: float = 1.0):
     """Create a fresh classifier by name.
 
     Fold preprocessing already returns a finite standardized numeric matrix, so
@@ -24,7 +24,7 @@ def make_estimator(name: str, *, random_state: int = 42):
             random_state=random_state,
             max_iter=2000,
             solver="lbfgs",
-            C=1.0,
+            C=logreg_c,
         )
     if normalized in {"random_forest", "rf"}:
         return RandomForestClassifier(

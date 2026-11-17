@@ -11,6 +11,7 @@ import pandas as pd
 from .config import ExperimentConfig
 from .data import load_dataset, stratified_limit
 from .experiment import (
+    _logreg_c_for_regime,
     _make_regimes,
     _positive_probabilities,
     derive_seed,
@@ -22,7 +23,9 @@ from .registry import make_generator, make_model
 from .stats import paired_stratified_bootstrap
 
 
-def _canonicalize_real_only(summary: pd.DataFrame, *, tolerance: float = 1e-12) -> pd.DataFrame:
+def _canonicalize_real_only(
+    summary: pd.DataFrame, *, tolerance: float = 1e-12
+) -> pd.DataFrame:
     """Collapse Real-only rows duplicated across generator loops."""
 
     real = summary[summary["regime"] == "Real-only"].copy()
@@ -41,7 +44,9 @@ def _canonicalize_real_only(summary: pd.DataFrame, *, tolerance: float = 1e-12) 
     ]
     spread = real.groupby(keys, dropna=False)["mean"].agg(["min", "max"])
     if ((spread["max"] - spread["min"]) > tolerance).any():
-        raise ValueError("Real-only development means differ across generators; baseline is not invariant")
+        raise ValueError(
+            "Real-only development means differ across generators; baseline is not invariant"
+        )
 
     canonical = real.sort_values("generator").drop_duplicates(keys).copy()
     canonical["generator"] = "none"
@@ -85,10 +90,18 @@ def select_best_configs(summary: pd.DataFrame) -> pd.DataFrame:
         ascending=[True, True, True, False, True, False, True, True],
         kind="mergesort",
     )
-    selected = candidates.groupby(["dataset", "model", "metric"], as_index=False).head(1).copy()
+    selected = (
+        candidates.groupby(["dataset", "model", "metric"], as_index=False)
+        .head(1)
+        .copy()
+    )
     selected = selected.drop(columns=["_real_priority"])
-    selected = selected.rename(columns={"metric": "selection_metric", "mean": "development_mean"})
-    return selected.sort_values(["dataset", "model", "selection_metric"]).reset_index(drop=True)
+    selected = selected.rename(
+        columns={"metric": "selection_metric", "mean": "development_mean"}
+    )
+    return selected.sort_values(["dataset", "model", "selection_metric"]).reset_index(
+        drop=True
+    )
 
 
 def evaluate_selected_on_holdout(
@@ -114,13 +127,17 @@ def evaluate_selected_on_holdout(
         selection_metric = str(selected["selection_metric"])
 
         bundle = load_dataset(dataset_name, data_dir)
-        bundle = stratified_limit(bundle, max_rows_per_dataset, random_state=config.random_state)
+        bundle = stratified_limit(
+            bundle, max_rows_per_dataset, random_state=config.random_state
+        )
         X_development, X_holdout, y_development, y_holdout = development_holdout_split(
             bundle,
             holdout_size=config.holdout_size,
             random_state=config.random_state,
         )
-        subset_seed = derive_seed(config.random_state, dataset_name, "final_training_subset")
+        subset_seed = derive_seed(
+            config.random_state, dataset_name, "final_training_subset"
+        )
         X_train_raw, y_train = stratified_fraction_subset(
             X_development,
             y_development,
@@ -129,7 +146,9 @@ def evaluate_selected_on_holdout(
         )
         y_train = y_train.reset_index(drop=True).rename("target")
 
-        preprocessing_seed = derive_seed(config.random_state, dataset_name, "final_preprocess")
+        preprocessing_seed = derive_seed(
+            config.random_state, dataset_name, "final_preprocess"
+        )
         preprocessor = FoldPreprocessor(
             categorical_columns=bundle.categorical_columns,
             numeric_columns=bundle.numeric_columns,
@@ -138,8 +157,15 @@ def evaluate_selected_on_holdout(
         X_train = preprocessor.fit_transform(X_train_raw, y_train)
         X_holdout_encoded = preprocessor.transform(X_holdout)
 
-        model_seed = derive_seed(config.random_state, dataset_name, model_name, "final_model")
-        reference_model = make_model(model_name, random_state=model_seed)
+        model_seed = derive_seed(
+            config.random_state, dataset_name, model_name, "final_model"
+        )
+        reference_c = _logreg_c_for_regime(
+            config.regularization_policy, n_real=len(X_train), n_regime=len(X_train)
+        )
+        reference_model = make_model(
+            model_name, random_state=model_seed, logreg_c=reference_c
+        )
         reference_model.fit(X_train, y_train)
         reference_probabilities = _positive_probabilities(
             reference_model,
@@ -177,12 +203,17 @@ def evaluate_selected_on_holdout(
                     f"Selected regime {regime_name!r} not available; got {sorted(regimes)}"
                 )
             X_selected, y_selected = regimes[regime_name]
-            selected_model = make_model(model_name, random_state=model_seed)
+            selected_c = _logreg_c_for_regime(
+                config.regularization_policy,
+                n_real=len(X_train),
+                n_regime=len(X_selected),
+            )
+            selected_model = make_model(
+                model_name, random_state=model_seed, logreg_c=selected_c
+            )
             selected_model.fit(X_selected, y_selected)
             selected_probabilities = _positive_probabilities(
-                selected_model,
-                X_holdout_encoded,
-                config.positive_label,
+                selected_model, X_holdout_encoded, config.positive_label
             )
             selected_positive_rate = float(y_selected.mean())
             selected_training_size = len(X_selected)
@@ -204,9 +235,14 @@ def evaluate_selected_on_holdout(
 
         for holdout_metric in ("AUROC", "AUPRC"):
             if regime_name == "Real-only":
+                selected_c = reference_c
                 from sklearn.metrics import average_precision_score, roc_auc_score
 
-                score_function = roc_auc_score if holdout_metric == "AUROC" else average_precision_score
+                score_function = (
+                    roc_auc_score
+                    if holdout_metric == "AUROC"
+                    else average_precision_score
+                )
                 score = float(score_function(y_holdout_array, reference_probabilities))
                 interval = {
                     "candidate_score": score,
@@ -238,8 +274,17 @@ def evaluate_selected_on_holdout(
                 {
                     "dataset": dataset_name,
                     "model": model_name,
+                    "regularization_policy": config.regularization_policy,
+                    "reference_logreg_c": (
+                        reference_c if model_name == "logreg" else np.nan
+                    ),
+                    "selected_logreg_c": (
+                        selected_c if model_name == "logreg" else np.nan
+                    ),
                     "selection_metric": selection_metric,
-                    "development_mean_selected_metric": float(selected["development_mean"]),
+                    "development_mean_selected_metric": float(
+                        selected["development_mean"]
+                    ),
                     "generator": selected_generator,
                     "synthetic_mode": synthetic_mode,
                     "categorical_encoding": str(selected["categorical_encoding"]),
@@ -263,5 +308,9 @@ def evaluate_selected_on_holdout(
             )
 
     comparisons = pd.DataFrame(comparison_rows)
-    predictions = pd.concat(prediction_frames, ignore_index=True) if prediction_frames else pd.DataFrame()
+    predictions = (
+        pd.concat(prediction_frames, ignore_index=True)
+        if prediction_frames
+        else pd.DataFrame()
+    )
     return {"comparisons": comparisons, "predictions": predictions}

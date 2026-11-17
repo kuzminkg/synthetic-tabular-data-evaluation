@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 SyntheticMode = Literal["class_conditional", "minority_only"]
+RegularizationPolicy = Literal["fixed", "adjusted"]
 CategoricalEncoding = Literal["target_order", "ordinal", "none"]
 
 
@@ -41,3 +42,4 @@ class ExperimentConfig:
     synthetic_mode: SyntheticMode = "class_conditional"
     positive_label: int = 1
     preprocessor: PreprocessConfig = field(default_factory=PreprocessConfig)
+    regularization_policy: RegularizationPolicy = "fixed"

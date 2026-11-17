@@ -1,6 +1,10 @@
 import pandas as pd
 
-from synthrep.experiment import _make_regimes, stratified_fraction_subset
+from synthrep.experiment import (
+    _make_regimes,
+    stratified_fraction_subset,
+    _logreg_c_for_regime,
+)
 from synthrep.generators import BootstrapGenerator
 
 
@@ -32,3 +36,10 @@ def test_minority_regimes_use_minority_count_not_total_count():
     assert plus_one_y.value_counts().to_dict() == {0: 8, 1: 4}
     assert len(plus_three_X) == 16
     assert plus_three_y.value_counts().to_dict() == {1: 8, 0: 8}
+
+
+def test_logreg_c_policy():
+    assert _logreg_c_for_regime("fixed", 100, 400) == 1.0
+    assert _logreg_c_for_regime("adjusted", 100, 100) == 1.0
+    assert _logreg_c_for_regime("adjusted", 100, 200) == 0.5
+    assert _logreg_c_for_regime("adjusted", 100, 400) == 0.25
