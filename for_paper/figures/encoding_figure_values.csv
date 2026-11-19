@@ -1,0 +1,17 @@
+dataset,metric,score,pipeline
+adult,AUPRC,0.6848087812800027,Ordinal: Real-only
+adult,AUROC,0.8550017829154593,Ordinal: Real-only
+default_credit,AUPRC,0.4926054948279227,Ordinal: Real-only
+default_credit,AUROC,0.7199428763035424,Ordinal: Real-only
+adult,AUPRC,0.6897135579171778,Ordinal: Mixed +1x
+adult,AUROC,0.8521443532772532,Ordinal: Mixed +1x
+default_credit,AUPRC,0.4568344163851515,Ordinal: Mixed +1x
+default_credit,AUROC,0.7040541373594145,Ordinal: Mixed +1x
+adult,AUPRC,0.7586619299786816,Target-order: Real-only
+adult,AUROC,0.9030404808532793,Target-order: Real-only
+default_credit,AUPRC,0.5439357093143671,Target-order: Real-only
+default_credit,AUROC,0.7644903516433951,Target-order: Real-only
+adult,AUPRC,0.7629626721573152,One-hot: Real-only
+adult,AUROC,0.9060579734329397,One-hot: Real-only
+default_credit,AUPRC,0.5434121953560944,One-hot: Real-only
+default_credit,AUROC,0.770119497840569,One-hot: Real-only

@@ -1,0 +1,46 @@
+{
+  "main": {
+    "fold_records": 38400,
+    "paired_comparisons": 576,
+    "family_size": 72,
+    "maximum_absolute_errors": {
+      "mean_reference": 2.220446049250313e-16,
+      "mean_candidate": 3.3306690738754696e-16,
+      "mean_delta": 1.1644331332494318e-16,
+      "corrected_se": 1.1579279202145187e-16,
+      "ci_low": 1.214306433183765e-16,
+      "ci_high": 1.5699247457590104e-16,
+      "p_value": 2.0528023725319144e-13,
+      "p_value_holm": 1.0325074129013956e-14
+    }
+  },
+  "ordinal": {
+    "fold_records": 4800,
+    "paired_comparisons": 72,
+    "family_size": 36,
+    "maximum_absolute_errors": {
+      "mean_reference": 1.1102230246251565e-16,
+      "mean_candidate": 5.551115123125783e-17,
+      "mean_delta": 1.0256552551712872e-16,
+      "corrected_se": 9.820161177287456e-17,
+      "ci_low": 1.0495077029659683e-16,
+      "ci_high": 9.882502802205373e-17,
+      "p_value": 4.107825191113079e-15,
+      "p_value_holm": 1.4432899320127035e-15
+    }
+  },
+  "sources": {
+    "supplementary_fold_scores.csv": "48c70f7df557f3dddf2e97c4ba167fa3fc9cc2069e0019f30c9979956795d107",
+    "supplementary_paired_results.csv": "172b0b38700043d2132b399e623ec248818b2b63694c196be9c0db605b9b79bf",
+    "ordinal_fold_scores.csv": "0b8298133db34b0b12e24ef7ba9dde6cb213b57b3c8a56f2850f1c8891da4bc3",
+    "ordinal_paired_results.csv": "c1625095bc7a90faaf35bdd97f97e79ccd4d77182f340941826b25b85c0b7080",
+    "onehot_fold_scores.csv": "1326758c5678bd63c98fa84fc92260f609d6d9773e0b7c6fcf4301f95840caf8"
+  },
+  "figure_notes": {
+    "confidence_intervals": "Pointwise approximate corrected-resampling 95% intervals; not Holm-adjusted.",
+    "absolute_baselines": "Real-only scores from the copula generator loop; original records retained.",
+    "trajectory_lines": "Mean trajectories only, without confidence bands or causal interpretation.",
+    "encoding": "Descriptive pipeline comparisons; no cross-encoding p values or intervals are inferred.",
+    "metrics": "AUPRC in archived CSVs is noninterpolated average precision, labelled AP in figures."
+  }
+}

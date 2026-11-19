@@ -44,3 +44,7 @@ figures/
 
 # Temporary VS Code files
 tempCodeRunnerFile.py
+
+# Include publication figures
+!for_paper/figures/
+!for_paper/figures/**
